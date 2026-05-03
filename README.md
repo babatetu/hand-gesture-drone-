@@ -1,6 +1,18 @@
 # GD-1 Gesture Drone
 
-GD-1 is a gesture-controlled obstacle-avoiding quadcopter project. This repository starts with Phase 1: the ESP32 glove firmware that reads an MPU6050 IMU, calculates pitch and roll, filters noise, maps tilt into normalized control values, and prints serial debug output.
+GD-1 is a gesture-controlled obstacle-avoiding quadcopter project. This repository includes ESP32 glove firmware that reads an MPU6050 IMU and sends commands over NRF24L01 to the drone receiver, which parses those commands and merges them with a 6-direction obstacle detection system (Ultrasonic + VL53L1X + mmWave Radar). The receiver converts these to an SBUS signal for the Pixhawk.
+
+**Range Spec:** 500m–1km (NRF24 PA+LNA)
+
+## Hardware Needed
+- 2x ESP32 Development Boards
+- 1x MPU6050 IMU
+- 2x NRF24L01 PA+LNA modules
+- 2x HC-SR04 Ultrasonic Distance Sensors
+- 1x LD2410 mmWave Radar
+- 4x VL53L1X Time-of-Flight sensors (Left / Right / Rear / Up)
+
+**XSHUT Wiring Note:** GPIO 13/12/32/33 → XSHUT pins for I2C address assignment at boot
 
 ## Current Build Scope
 
@@ -39,33 +51,24 @@ firmware/
     test/
       test_gesture_processor/
         test_gesture_processor.cpp
-  csi_node/
-    include/
-      CSIConfig.h
-    src/
-      main.cpp
   drone_receiver/
     include/
       DroneReceiverConfig.h
-      RuViewSafety.h
+      UltrasonicSensor.h
+      SBUSGenerator.h
+      LD2410Driver.h
+      VL53L1XArray.h
     src/
-      RuViewSafety.cpp
+      UltrasonicSensor.cpp
+      SBUSGenerator.cpp
+      LD2410Driver.cpp
+      VL53L1XArray.cpp
       main.cpp
-server/
-  ruview_csi_bridge/
-third_party/
-  RuView/
 docs/
   phase-plan.md
-  ruview-csi-integration.md
   wiring-fr1.md
+  setup-instructions.md
 ```
-
-## RuView CSI Perception
-
-RuView WiFi CSI sensing is integrated as a secondary perception layer. It uses an existing WiFi router and ESP32-S3 CSI nodes only. No camera, OpenCV, YOLO, or visual processing is part of the GD-1 pipeline.
-
-See `docs/ruview-csi-integration.md`.
 
 ## Build
 

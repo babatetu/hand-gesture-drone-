@@ -13,11 +13,13 @@ enum class GestureDirection {
 struct GestureAttitude {
   float pitchDeg;
   float rollDeg;
+  float yawRateDps;
 };
 
 struct GestureCommand {
   int8_t pitch;
   int8_t roll;
+  int8_t yaw;
   GestureDirection direction;
   bool neutral;
 };

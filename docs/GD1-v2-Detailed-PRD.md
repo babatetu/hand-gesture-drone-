@@ -90,7 +90,7 @@ The system is distributed across three primary physical environments communicati
     *   *Stable Mode:* Default. Scales pitch/roll/yaw inputs by 50%. Limits maximum drone tilt for gentle, safe flying.
     *   *Fast Mode:* Toggled via glove button. Allows 100% command pass-through for aggressive flight and fighting high winds.
 *   **Failsafe:** If the drone receiver does not receive a `GD1Protocol` packet for > 500ms, all movement commands (Pitch, Roll, Yaw, Throttle) default to 0 (neutral/hover).
-*   **Wind Resistance:** The ESP32 handles positioning; the Pixhawk's internal PID loop handles physical wind resistance and stability automatically.
+*   **Wind Resistance:** The ESP32 handles command translation and safety arbitration; the Pixhawk + ArduPilot PID loop handles all stabilization, attitude hold, and wind resistance autonomously.
 
 ---
 

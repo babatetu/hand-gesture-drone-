@@ -16,9 +16,16 @@ constexpr unsigned int GD1_CALIBRATION_DELAY_MS = 8;
 // Tune these after watching serial output with the glove on your hand.
 constexpr float GD1_DEADZONE_DEG = 6.0f;
 constexpr float GD1_MAX_TILT_DEG = 30.0f;
-constexpr float GD1_LOW_PASS_ALPHA = 0.85f;
+
+// Alpha = 0.65 → ~33ms time constant at 50Hz. Keeps total
+// control loop latency within the 100ms target budget.
+// 0.85 was too aggressive (~113ms lag, exceeding budget).
+constexpr float GD1_LOW_PASS_ALPHA = 0.65f;
 
 // Change signs if your mounted MPU6050 orientation is reversed.
 constexpr float GD1_PITCH_COMMAND_SIGN = 1.0f;
 constexpr float GD1_ROLL_COMMAND_SIGN = 1.0f;
 
+// NRF24L01 SPI Pins
+constexpr int GD1_NRF24_CE_PIN = 5;
+constexpr int GD1_NRF24_CSN_PIN = 15;

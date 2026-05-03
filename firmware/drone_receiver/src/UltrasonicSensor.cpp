@@ -1,8 +1,7 @@
 #include "UltrasonicSensor.h"
-#include "DroneReceiverConfig.h"
 
-UltrasonicSensor::UltrasonicSensor(int trigPin, int echoPin)
-    : trigPin(trigPin), echoPin(echoPin), distanceCm(999.0f), lastTriggerMs(0), echoStartMicros(0), state(State::Idle) {}
+UltrasonicSensor::UltrasonicSensor(int trigPin, int echoPin, uint32_t intervalMs)
+    : trigPin(trigPin), echoPin(echoPin), measureIntervalMs(intervalMs), distanceCm(999.0f), lastTriggerMs(0), echoStartMicros(0), state(State::Idle) {}
 
 void UltrasonicSensor::begin() {
   pinMode(trigPin, OUTPUT);
@@ -16,7 +15,7 @@ void UltrasonicSensor::update() {
 
   switch (state) {
   case State::Idle:
-    if (nowMs - lastTriggerMs >= GD1_ULTRASONIC_MEASURE_INTERVAL_MS) {
+    if (nowMs - lastTriggerMs >= measureIntervalMs) {
       lastTriggerMs = nowMs;
       digitalWrite(trigPin, HIGH);
       echoStartMicros = nowMicros;

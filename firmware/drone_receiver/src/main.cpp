@@ -1,11 +1,12 @@
 #include <Arduino.h>
-#include <WiFi.h>
-#include <WiFiUdp.h>
-#include <WebServer.h>
+#include <SPI.h>
+#include <nRF24L01.h>
+#include <RF24.h>
 
 #include "DroneReceiverConfig.h"
-#include "RuViewSafety.h"
 #include "UltrasonicSensor.h"
+#include "LD2410Driver.h"
+#include "VL53L1XArray.h"
 #include "GD1Protocol.h"
 #include "SBUSGenerator.h"
 
@@ -13,13 +14,23 @@
 #define GD1_DRONE_RECEIVER_FIRMWARE "GD-1_Drone_Receiver_Full"
 #endif
 
+static constexpr uint16_t HARD_BLOCK_SIDE_CM  = 30;
+static constexpr uint16_t HARD_BLOCK_REAR_CM  = 30;
+static constexpr uint16_t HARD_BLOCK_UP_CM    = 40;
+static constexpr uint16_t SOFT_WARN_SIDE_CM   = 80;
+static constexpr uint16_t SOFT_WARN_REAR_CM   = 80;
+static constexpr uint16_t SOFT_WARN_UP_CM     = 80;
+
 namespace {
 
-WebServer server(GD1_RUVIEW_LISTEN_PORT);
-RuViewDecision latestRuViewDecision{false, RuViewMotion::None, RuViewDirection::Unknown, 0, false};
+UltrasonicSensor frontUltrasonic(GD1_ULTRASONIC_FRONT_TRIG_PIN, GD1_ULTRASONIC_FRONT_ECHO_PIN, GD1_ULTRASONIC_MEASURE_INTERVAL_MS);
+UltrasonicSensor bottomUltrasonic(GD1_ULTRASONIC_BOTTOM_TRIG_PIN, GD1_ULTRASONIC_BOTTOM_ECHO_PIN, GD1_ULTRASONIC_BOTTOM_MEASURE_INTERVAL_MS);
+LD2410Driver radar(GD1_LD2410_RX_PIN, GD1_LD2410_TX_PIN);
+VL53L1XArray tofArray;
 
-UltrasonicSensor frontUltrasonic(GD1_ULTRASONIC_FRONT_TRIG_PIN, GD1_ULTRASONIC_FRONT_ECHO_PIN);
-WiFiUDP gestureUdp;
+RF24 radio(GD1_NRF24_CE_PIN, GD1_NRF24_CSN_PIN);
+const uint64_t radioPipe = 0xE8E8F0F0E1LL;
+
 GD1ControlCommand latestGestureCommand{};
 uint32_t lastGestureReceivedMs = 0;
 SBUSGenerator sbus(GD1_SBUS_TX_PIN);
@@ -31,80 +42,85 @@ int16_t gestureYawCommand = 0;
 bool isFastMode = false;
 
 int16_t safePitchCommand = 0;
-
-void connectWiFi() {
-  WiFi.mode(WIFI_STA);
-  WiFi.setSleep(false);
-  WiFi.begin(GD1_DRONE_WIFI_SSID, GD1_DRONE_WIFI_PASSWORD);
-
-  Serial.print("Connecting drone receiver to router SSID: ");
-  Serial.println(GD1_DRONE_WIFI_SSID);
-
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(300);
-    Serial.print('.');
-  }
-
-  Serial.println();
-  Serial.print("Drone receiver IP: ");
-  Serial.println(WiFi.localIP());
-}
+int16_t safeThrottleCommand = 0;
+int16_t previousThrottleCommand = 0;
+uint16_t lastSafeThrottle = 0; // TODO: replace with ArduPilot GCS failsafe / RTL in future
 
 bool ultrasonicBlocksForward() {
   return frontUltrasonic.isObstacleDetected(GD1_ULTRASONIC_BLOCK_DISTANCE_CM);
 }
 
-int16_t applySafetyOverrides(int16_t requestedPitch) {
-  const uint32_t now = millis();
-
-  if (ultrasonicBlocksForward() && requestedPitch > 0) {
-    return 0;
+void applySafetyOverrides() {
+  // Pitch Forward
+  // Tier 1: Ultrasonic
+  if (ultrasonicBlocksForward() && gesturePitchCommand > 0) {
+    gesturePitchCommand = 0;
+  }
+  // Tier 2: LD2410 Radar
+  else if (radar.isPersonDetected() && gesturePitchCommand > 0) {
+    gesturePitchCommand = 0;
   }
 
-  if (GD1_ENABLE_RUVIEW_FORWARD_BLOCK &&
-      shouldBlockForwardFromRuView(latestRuViewDecision, now, GD1_RUVIEW_TIMEOUT_MS) &&
-      requestedPitch > 0) {
-    return 0;
+  // Pitch Backward (Rear VL53L1X)
+  if (tofArray.isOk(2) && gesturePitchCommand < 0) {
+    uint16_t rearDist = tofArray.getRear();
+    if (rearDist < HARD_BLOCK_REAR_CM) {
+      gesturePitchCommand = 0;
+      Serial.println("HARD BLOCK: REAR");
+    } else if (rearDist < SOFT_WARN_REAR_CM) {
+      gesturePitchCommand = static_cast<int16_t>(gesturePitchCommand * 0.5f);
+    }
   }
 
-  return requestedPitch;
+  // Roll Left (Left VL53L1X)
+  if (tofArray.isOk(0) && gestureRollCommand < 0) {
+    uint16_t leftDist = tofArray.getLeft();
+    if (leftDist < HARD_BLOCK_SIDE_CM) {
+      gestureRollCommand = 0;
+      Serial.println("HARD BLOCK: LEFT");
+    } else if (leftDist < SOFT_WARN_SIDE_CM) {
+      gestureRollCommand = static_cast<int16_t>(gestureRollCommand * 0.5f);
+    }
+  }
+
+  // Roll Right (Right VL53L1X)
+  if (tofArray.isOk(1) && gestureRollCommand > 0) {
+    uint16_t rightDist = tofArray.getRight();
+    if (rightDist < HARD_BLOCK_SIDE_CM) {
+      gestureRollCommand = 0;
+      Serial.println("HARD BLOCK: RIGHT");
+    } else if (rightDist < SOFT_WARN_SIDE_CM) {
+      gestureRollCommand = static_cast<int16_t>(gestureRollCommand * 0.5f);
+    }
+  }
+
+  // Throttle Up (Up VL53L1X)
+  if (tofArray.isOk(3) && gestureThrottleCommand > lastSafeThrottle) {
+    uint16_t upDist = tofArray.getUp();
+    if (upDist < HARD_BLOCK_UP_CM) {
+      gestureThrottleCommand = lastSafeThrottle; // Clamp
+      Serial.println("HARD BLOCK: UP");
+    } else if (upDist < SOFT_WARN_UP_CM) {
+      int16_t diff = gestureThrottleCommand - lastSafeThrottle;
+      gestureThrottleCommand = lastSafeThrottle + static_cast<int16_t>(diff * 0.5f);
+    }
+  }
 }
 
 void handleGesturePacket() {
-  const int packetSize = gestureUdp.parsePacket();
-  if (packetSize <= 0) {
+  if (!radio.available()) {
     return;
   }
 
-  uint8_t buffer[64] = {};
-  const int bytesRead = gestureUdp.read(buffer, sizeof(buffer));
+  uint8_t buffer[32] = {};
+  radio.read(buffer, GD1_COMMAND_PACKET_SIZE);
 
-  if (bytesRead > 0) {
-    GD1ControlCommand command;
-    if (gd1DecodeCommandPacket(buffer, bytesRead, command)) {
-      latestGestureCommand = command;
-      lastGestureReceivedMs = millis();
-    } else {
-      Serial.println("WARN: Invalid gesture packet received.");
-    }
-  }
-}
-
-void handleRuView() {
-  if (server.hasArg("plain")) {
-    String payload = server.arg("plain");
-    RuViewDecision parsed{};
-
-    if (parseRuViewDecision(payload.c_str(), millis(), parsed)) {
-      latestRuViewDecision = parsed;
-      server.send(200, "application/json", "{\"status\":\"ok\"}");
-    } else {
-      Serial.print("WARN: Invalid RuView JSON: ");
-      Serial.println(payload);
-      server.send(400, "application/json", "{\"status\":\"error\",\"message\":\"invalid json\"}");
-    }
+  GD1ControlCommand command;
+  if (gd1DecodeCommandPacket(buffer, GD1_COMMAND_PACKET_SIZE, command)) {
+    latestGestureCommand = command;
+    lastGestureReceivedMs = millis();
   } else {
-    server.send(400, "application/json", "{\"status\":\"error\",\"message\":\"missing body\"}");
+    Serial.println("WARN: Invalid gesture packet received.");
   }
 }
 
@@ -118,18 +134,14 @@ void printSafetyDebug() {
 
   lastPrintMs = now;
 
-  Serial.print("dist=");
+  Serial.print("f_dist=");
   Serial.print(frontUltrasonic.getDistanceCm(), 1);
-  Serial.print(",g_pitch=");
-  Serial.print(gesturePitchCommand);
-  Serial.print(",s_pitch=");
-  Serial.print(safePitchCommand);
-  Serial.print(",ruview_presence=");
-  Serial.print(latestRuViewDecision.presence ? "true" : "false");
-  Serial.print(",ruview_motion=");
-  Serial.print(ruViewMotionName(latestRuViewDecision.motion));
-  Serial.print(",ruview_direction=");
-  Serial.println(ruViewDirectionName(latestRuViewDecision.direction));
+  Serial.print(",b_dist=");
+  Serial.print(bottomUltrasonic.getDistanceCm(), 1);
+  Serial.print(",radar=");
+  Serial.print(radar.isPersonDetected() ? "1" : "0");
+  Serial.printf(" L:%dcm R:%dcm REAR:%dcm UP:%dcm\n",
+    tofArray.getLeft(), tofArray.getRight(), tofArray.getRear(), tofArray.getUp());
 }
 
 } // namespace
@@ -140,27 +152,36 @@ void setup() {
 
   Serial.println();
   Serial.println(GD1_DRONE_RECEIVER_FIRMWARE);
-  Serial.println("GD-1 Full Receiver: Ultrasonic + RuView + GD1Protocol + SBUS");
+  Serial.println("GD-1 Full Receiver: Ultrasonic + Radar + NRF24 + GD1Protocol + SBUS");
 
   frontUltrasonic.begin();
+  bottomUltrasonic.begin();
+  radar.begin();
+  tofArray.begin();
   sbus.begin();
 
-  connectWiFi();
+  SPI.begin(18, 19, 23, 15); // SCK, MISO, MOSI, SS (CSN) - using standard ESP32 VSPI pins
 
-  server.on("/ruview", HTTP_POST, handleRuView);
-  server.begin();
+  if (!radio.begin()) {
+    Serial.println("ERROR: NRF24L01 radio hardware is not responding!");
+    while (true) {
+      delay(1000);
+    }
+  }
 
-  Serial.print("Listening for RuView JSON on HTTP port ");
-  Serial.println(GD1_RUVIEW_LISTEN_PORT);
+  radio.setPALevel(RF24_PA_HIGH);
+  radio.setDataRate(RF24_250KBPS);
+  radio.openReadingPipe(1, radioPipe);
+  radio.startListening();
 
-  gestureUdp.begin(GD1_GESTURE_LISTEN_PORT);
-  Serial.print("Listening for GD1Protocol via UDP on port ");
-  Serial.println(GD1_GESTURE_LISTEN_PORT);
+  Serial.println("Listening for GD1Protocol via NRF24L01");
 }
 
 void loop() {
-  server.handleClient();
   frontUltrasonic.update();
+  bottomUltrasonic.update();
+  radar.update();
+  tofArray.update();
   handleGesturePacket();
 
   const uint32_t now = millis();
@@ -169,8 +190,8 @@ void loop() {
   if (now - lastGestureReceivedMs > GD1_GESTURE_TIMEOUT_MS) {
     gesturePitchCommand = 0;
     gestureRollCommand = 0;
-    gestureThrottleCommand = 0;
     gestureYawCommand = 0;
+    gestureThrottleCommand = lastSafeThrottle;
   } else {
     isFastMode = (latestGestureCommand.flags & GD1_FLAG_FAST_MODE) != 0;
 
@@ -181,21 +202,42 @@ void loop() {
     gestureRollCommand = latestGestureCommand.roll * scale;
     gestureThrottleCommand = latestGestureCommand.throttle;
     gestureYawCommand = latestGestureCommand.yaw * scale;
+
+    lastSafeThrottle = gestureThrottleCommand;
   }
 
-  safePitchCommand = applySafetyOverrides(gesturePitchCommand);
+  applySafetyOverrides();
 
-  // Map -100 to 100 range to 1000-2000 PWM
-  uint16_t pwmPitch = 1500 + (safePitchCommand * 5);
-  uint16_t pwmRoll = 1500 + (gestureRollCommand * 5);
-  uint16_t pwmYaw = 1500 + (gestureYawCommand * 5);
-  uint16_t pwmThrottle = 1000 + (gestureThrottleCommand * 10); // Assume throttle is 0 to 100
+  safePitchCommand = gesturePitchCommand;
+  safeThrottleCommand = gestureThrottleCommand;
+
+  // Soft landing guard:
+  float alt = bottomUltrasonic.getDistanceCm();
+  if (alt > 0.0f && alt < 30.0f) {
+    if (safeThrottleCommand < previousThrottleCommand) {
+      // TODO: tune threshold for maximum throttle reduction rate near ground
+      int16_t maxReduction = 5;
+      if ((previousThrottleCommand - safeThrottleCommand) > maxReduction) {
+        safeThrottleCommand = previousThrottleCommand - maxReduction;
+      }
+    }
+  }
+
+  previousThrottleCommand = safeThrottleCommand;
+
+  // Map -100 to 100 range to SBUS 172-1811 (center 992)
+  // Half range is ~819 (1811 - 992)
+  uint16_t sbusPitch = 992 + (safePitchCommand * 819 / 100);
+  uint16_t sbusRoll = 992 + (gestureRollCommand * 819 / 100);
+  uint16_t sbusYaw = 992 + (gestureYawCommand * 819 / 100);
+  // Throttle 0 to 100 mapping: 0 -> 172, 100 -> 1811 (diff 1639)
+  uint16_t sbusThrottle = 172 + (safeThrottleCommand * 1639 / 100);
 
   // AETR mapping for SBUS: Ch1=Roll, Ch2=Pitch, Ch3=Throttle, Ch4=Yaw
-  sbus.setChannel(0, pwmRoll);
-  sbus.setChannel(1, pwmPitch);
-  sbus.setChannel(2, pwmThrottle);
-  sbus.setChannel(3, pwmYaw);
+  sbus.setChannel(0, sbusRoll);
+  sbus.setChannel(1, sbusPitch);
+  sbus.setChannel(2, sbusThrottle);
+  sbus.setChannel(3, sbusYaw);
 
   sbus.update();
 

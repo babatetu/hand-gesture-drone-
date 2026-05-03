@@ -1,3 +1,0 @@
-# The GD-1 CSI bridge uses only Python standard library modules.
-# Keep this file empty unless a future RuView model adapter requires a dependency.
-

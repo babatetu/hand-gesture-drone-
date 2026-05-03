@@ -9,8 +9,7 @@ public:
 
   void begin();
 
-  // Channels are 0-indexed. Expects mapped values (typically 1000-2000 representing PWM us).
-  // SBUS native scale is approximately 172 to 1811.
+  // Channels are 0-indexed. Expects mapped values in standard SBUS range (172-1811, center 992).
   void setChannel(uint8_t channel, uint16_t value);
   void update();
 

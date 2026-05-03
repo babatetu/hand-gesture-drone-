@@ -2,6 +2,9 @@
 
 #include <cmath>
 
+static constexpr float YAW_DEADBAND_DPS  = 5.0f;
+static constexpr float YAW_MAX_RATE_DPS  = 60.0f;
+
 namespace {
 
 float clampFloat(float value, float minValue, float maxValue) {
@@ -22,9 +25,21 @@ GestureProcessor::GestureProcessor(float deadzoneDeg, float maxTiltDeg)
     : deadzoneDeg_(std::fabs(deadzoneDeg)),
       maxTiltDeg_(std::fabs(maxTiltDeg) < 1.0f ? 1.0f : std::fabs(maxTiltDeg)) {}
 
+// Yaw uses raw gyro Z rate (not integrated angle).
+// Rate-based control eliminates gyro drift entirely.
+// Deadband filters resting noise. Pixhawk compass handles
+// absolute drone heading independently.
 GestureCommand GestureProcessor::process(const GestureAttitude &attitude) const {
   const int8_t pitchCommand = normalizeAxis(attitude.pitchDeg);
   const int8_t rollCommand = normalizeAxis(attitude.rollDeg);
+
+  float yawRate = attitude.yawRateDps;
+  if (std::fabs(yawRate) < YAW_DEADBAND_DPS) {
+    yawRate = 0.0f;
+  }
+
+  float normalizedYaw = clampFloat((yawRate / YAW_MAX_RATE_DPS) * 100.0f, -100.0f, 100.0f);
+  int8_t yawCommand = static_cast<int8_t>(std::lround(normalizedYaw));
 
   GestureDirection direction = GestureDirection::Hover;
   const bool neutral = pitchCommand == 0 && rollCommand == 0;
@@ -40,6 +55,7 @@ GestureCommand GestureProcessor::process(const GestureAttitude &attitude) const 
   return GestureCommand{
       pitchCommand,
       rollCommand,
+      yawCommand,
       direction,
       neutral,
   };

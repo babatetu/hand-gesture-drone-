@@ -3,6 +3,9 @@
 
 #include <Adafruit_MPU6050.h>
 #include <Adafruit_Sensor.h>
+#include <SPI.h>
+#include <nRF24L01.h>
+#include <RF24.h>
 
 #include <cmath>
 
@@ -19,6 +22,9 @@ namespace {
 Adafruit_MPU6050 mpu;
 GestureProcessor gestureProcessor(GD1_DEADZONE_DEG, GD1_MAX_TILT_DEG);
 
+RF24 radio(GD1_NRF24_CE_PIN, GD1_NRF24_CSN_PIN);
+const uint64_t radioPipe = 0xE8E8F0F0E1LL;
+
 GestureAttitude neutralOffset{0.0f, 0.0f};
 GestureAttitude filteredAttitude{0.0f, 0.0f};
 bool hasFilteredSample = false;
@@ -34,7 +40,7 @@ float radiansToDegrees(float radians) {
   return radians * 57.2957795131f;
 }
 
-GestureAttitude calculateAttitude(const sensors_event_t &accel) {
+GestureAttitude calculateAttitude(const sensors_event_t &accel, const sensors_event_t &gyro) {
   const float ax = accel.acceleration.x;
   const float ay = accel.acceleration.y;
   const float az = accel.acceleration.z;
@@ -45,6 +51,7 @@ GestureAttitude calculateAttitude(const sensors_event_t &accel) {
   return GestureAttitude{
       radiansToDegrees(pitch),
       radiansToDegrees(roll),
+      radiansToDegrees(gyro.gyro.z),
   };
 }
 
@@ -57,7 +64,7 @@ bool readAttitude(GestureAttitude &attitude) {
     return false;
   }
 
-  attitude = calculateAttitude(accel);
+  attitude = calculateAttitude(accel, gyro);
   return true;
 }
 
@@ -74,6 +81,9 @@ GestureAttitude lowPassFilter(const GestureAttitude &current) {
   filteredAttitude.rollDeg =
       (GD1_LOW_PASS_ALPHA * filteredAttitude.rollDeg) +
       ((1.0f - GD1_LOW_PASS_ALPHA) * current.rollDeg);
+  filteredAttitude.yawRateDps =
+      (GD1_LOW_PASS_ALPHA * filteredAttitude.yawRateDps) +
+      ((1.0f - GD1_LOW_PASS_ALPHA) * current.yawRateDps);
 
   return filteredAttitude;
 }
@@ -119,6 +129,7 @@ GestureAttitude applyNeutralOffset(const GestureAttitude &attitude) {
   return GestureAttitude{
       (attitude.pitchDeg - neutralOffset.pitchDeg) * GD1_PITCH_COMMAND_SIGN,
       (attitude.rollDeg - neutralOffset.rollDeg) * GD1_ROLL_COMMAND_SIGN,
+      attitude.yawRateDps, // Gyro rate doesn't need a static neutral offset
   };
 }
 
@@ -191,6 +202,20 @@ void setup() {
     }
   }
 
+  SPI.begin(18, 19, 23, 15); // SCK, MISO, MOSI, SS (CSN) - using standard ESP32 VSPI pins
+
+  if (!radio.begin()) {
+    Serial.println("ERROR: NRF24L01 radio hardware is not responding!");
+    while (true) {
+      delay(1000);
+    }
+  }
+
+  radio.setPALevel(RF24_PA_HIGH);
+  radio.setDataRate(RF24_250KBPS);
+  radio.openWritingPipe(radioPipe);
+  radio.stopListening();
+
   pinMode(GD1_MODE_BUTTON_PIN, INPUT_PULLUP);
 
   printCsvHeader();
@@ -231,10 +256,14 @@ void loop() {
       command.pitch,
       command.roll,
       0,
-      0,
+      command.yaw,
       flags,
   };
   const bool packetOk = gd1EncodeCommandPacket(radioCommand, packet, sizeof(packet));
+
+  if (packetOk) {
+    radio.write(packet, GD1_COMMAND_PACKET_SIZE);
+  }
 
   if (now - lastSerialMs >= GD1_SERIAL_INTERVAL_MS) {
     lastSerialMs = now;
