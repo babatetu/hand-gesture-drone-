@@ -5,6 +5,8 @@ import json
 from pathlib import Path
 import socket
 import time
+import urllib.request
+import urllib.error
 
 from .csi_processor import CsiProcessor, CsiProcessorConfig, CsiDecision
 from .protocol import parse_csi_datagram
@@ -16,10 +18,16 @@ def load_config(path: Path) -> dict[str, object]:
         return json.load(config_file)
 
 
-def send_decision(sock: socket.socket, target: tuple[str, int], decision: CsiDecision) -> None:
+def send_decision(drone_host: str, drone_port: int, decision: CsiDecision) -> None:
+    url = f"http://{drone_host}:{drone_port}/ruview"
     payload = json.dumps(decision.to_json_dict(), separators=(",", ":")).encode("utf-8")
-    sock.sendto(payload, target)
-    print(payload.decode("utf-8"), flush=True)
+    req = urllib.request.Request(url, data=payload, headers={'Content-Type': 'application/json'})
+    try:
+        with urllib.request.urlopen(req, timeout=0.2) as response:
+            pass
+        print(payload.decode("utf-8"), flush=True)
+    except Exception as exc:
+        print(f"WARN: Failed to send to drone: {exc}", flush=True)
 
 
 def run(config_path: Path) -> None:
@@ -48,13 +56,11 @@ def run(config_path: Path) -> None:
     receive_sock.bind((listen_host, listen_port))
     receive_sock.settimeout(0.2)
 
-    transmit_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    drone_target = (drone_host, drone_port)
     last_emit = 0.0
     latest_decision = CsiDecision(False, "none", "unknown")
 
     print(f"Listening for CSI on {listen_host}:{listen_port}", flush=True)
-    print(f"Sending drone JSON to {drone_host}:{drone_port}", flush=True)
+    print(f"Sending drone JSON to {drone_host}:{drone_port} via HTTP POST", flush=True)
 
     while True:
         try:
@@ -72,7 +78,7 @@ def run(config_path: Path) -> None:
         now = time.monotonic()
         if now - last_emit >= emit_interval_seconds:
             last_emit = now
-            send_decision(transmit_sock, drone_target, latest_decision)
+            send_decision(drone_host, drone_port, latest_decision)
 
 
 def main() -> None:

@@ -86,12 +86,20 @@ class CsiProcessor:
         if not active_nodes:
             return CsiDecision(False, "none", "unknown")
 
-        strongest = max(active_nodes, key=lambda node: node.motion_score)
-        max_motion = strongest.motion_score
-        max_energy_delta = max(
-            abs(node.energy - (node.baseline_energy or node.energy))
-            for node in active_nodes
-        )
+        # Use energy delta to estimate position since it is a simpler presence indicator
+        # than the motion score which captures rapid changes.
+        for node in active_nodes:
+            # ensure baseline energy is not None, fall back to current energy
+            base = node.baseline_energy if node.baseline_energy is not None else node.energy
+            node.energy_delta = abs(node.energy - base)
+
+        # To extract position estimation we find the node with the highest energy change
+        strongest_presence_node = max(active_nodes, key=lambda node: getattr(node, 'energy_delta', 0.0))
+        max_energy_delta = getattr(strongest_presence_node, 'energy_delta', 0.0)
+
+        # For motion, we find the node with the highest motion score
+        strongest_motion_node = max(active_nodes, key=lambda node: node.motion_score)
+        max_motion = strongest_motion_node.motion_score
 
         presence = (
             max_motion >= self.config.motion_low_threshold
@@ -105,7 +113,8 @@ class CsiProcessor:
         else:
             motion = "none"
 
-        direction = strongest.direction if presence else "unknown"
+        # Direction (position estimation) is based on the node with the highest energy delta
+        direction = strongest_presence_node.direction if presence else "unknown"
 
         return CsiDecision(presence, motion, direction)
 

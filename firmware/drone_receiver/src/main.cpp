@@ -1,6 +1,6 @@
 #include <Arduino.h>
 #include <WiFi.h>
-#include <WiFiUdp.h>
+#include <WebServer.h>
 
 #include "DroneReceiverConfig.h"
 #include "RuViewSafety.h"
@@ -11,7 +11,7 @@
 
 namespace {
 
-WiFiUDP udp;
+WebServer server(GD1_RUVIEW_LISTEN_PORT);
 RuViewDecision latestRuViewDecision{false, RuViewMotion::None, RuViewDirection::Unknown, 0, false};
 
 int16_t gesturePitchCommand = 0;
@@ -56,29 +56,21 @@ int16_t applySafetyOverrides(int16_t requestedPitch) {
   return requestedPitch;
 }
 
-void readRuViewJson() {
-  const int packetSize = udp.parsePacket();
+void handleRuView() {
+  if (server.hasArg("plain")) {
+    String payload = server.arg("plain");
+    RuViewDecision parsed{};
 
-  if (packetSize <= 0) {
-    return;
-  }
-
-  char packet[160] = {};
-  const int bytesRead = udp.read(packet, sizeof(packet) - 1);
-
-  if (bytesRead <= 0) {
-    return;
-  }
-
-  packet[bytesRead] = '\0';
-
-  RuViewDecision parsed{};
-
-  if (parseRuViewDecision(packet, millis(), parsed)) {
-    latestRuViewDecision = parsed;
+    if (parseRuViewDecision(payload.c_str(), millis(), parsed)) {
+      latestRuViewDecision = parsed;
+      server.send(200, "application/json", "{\"status\":\"ok\"}");
+    } else {
+      Serial.print("WARN: Invalid RuView JSON: ");
+      Serial.println(payload);
+      server.send(400, "application/json", "{\"status\":\"error\",\"message\":\"invalid json\"}");
+    }
   } else {
-    Serial.print("WARN: Invalid RuView JSON: ");
-    Serial.println(packet);
+    server.send(400, "application/json", "{\"status\":\"error\",\"message\":\"missing body\"}");
   }
 }
 
@@ -115,14 +107,16 @@ void setup() {
   Serial.println("RuView CSI JSON integration. No camera, OpenCV, YOLO, or visual processing.");
 
   connectWiFi();
-  udp.begin(GD1_RUVIEW_LISTEN_PORT);
 
-  Serial.print("Listening for RuView JSON on UDP port ");
+  server.on("/ruview", HTTP_POST, handleRuView);
+  server.begin();
+
+  Serial.print("Listening for RuView JSON on HTTP port ");
   Serial.println(GD1_RUVIEW_LISTEN_PORT);
 }
 
 void loop() {
-  readRuViewJson();
+  server.handleClient();
 
   // Replace this placeholder with the decoded gesture pitch command from FR2/FR3.
   gesturePitchCommand = 40;
