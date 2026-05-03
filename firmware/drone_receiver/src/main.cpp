@@ -1,12 +1,16 @@
 #include <Arduino.h>
 #include <WiFi.h>
+#include <WiFiUdp.h>
 #include <WebServer.h>
 
 #include "DroneReceiverConfig.h"
 #include "RuViewSafety.h"
+#include "UltrasonicSensor.h"
+#include "GD1Protocol.h"
+#include "SBUSGenerator.h"
 
 #ifndef GD1_DRONE_RECEIVER_FIRMWARE
-#define GD1_DRONE_RECEIVER_FIRMWARE "GD-1_Drone_Receiver_RuView"
+#define GD1_DRONE_RECEIVER_FIRMWARE "GD-1_Drone_Receiver_Full"
 #endif
 
 namespace {
@@ -14,7 +18,17 @@ namespace {
 WebServer server(GD1_RUVIEW_LISTEN_PORT);
 RuViewDecision latestRuViewDecision{false, RuViewMotion::None, RuViewDirection::Unknown, 0, false};
 
+UltrasonicSensor frontUltrasonic(GD1_ULTRASONIC_FRONT_TRIG_PIN, GD1_ULTRASONIC_FRONT_ECHO_PIN);
+WiFiUDP gestureUdp;
+GD1ControlCommand latestGestureCommand{};
+uint32_t lastGestureReceivedMs = 0;
+SBUSGenerator sbus(GD1_SBUS_TX_PIN);
+
 int16_t gesturePitchCommand = 0;
+int16_t gestureRollCommand = 0;
+int16_t gestureThrottleCommand = 0;
+int16_t gestureYawCommand = 0;
+
 int16_t safePitchCommand = 0;
 
 void connectWiFi() {
@@ -36,8 +50,7 @@ void connectWiFi() {
 }
 
 bool ultrasonicBlocksForward() {
-  // Placeholder for primary safety. Wire HC-SR04 checks here before flight tests.
-  return false;
+  return frontUltrasonic.isObstacleDetected(GD1_ULTRASONIC_BLOCK_DISTANCE_CM);
 }
 
 int16_t applySafetyOverrides(int16_t requestedPitch) {
@@ -54,6 +67,26 @@ int16_t applySafetyOverrides(int16_t requestedPitch) {
   }
 
   return requestedPitch;
+}
+
+void handleGesturePacket() {
+  const int packetSize = gestureUdp.parsePacket();
+  if (packetSize <= 0) {
+    return;
+  }
+
+  uint8_t buffer[64] = {};
+  const int bytesRead = gestureUdp.read(buffer, sizeof(buffer));
+
+  if (bytesRead > 0) {
+    GD1ControlCommand command;
+    if (gd1DecodeCommandPacket(buffer, bytesRead, command)) {
+      latestGestureCommand = command;
+      lastGestureReceivedMs = millis();
+    } else {
+      Serial.println("WARN: Invalid gesture packet received.");
+    }
+  }
 }
 
 void handleRuView() {
@@ -84,9 +117,11 @@ void printSafetyDebug() {
 
   lastPrintMs = now;
 
-  Serial.print("gesture_pitch=");
+  Serial.print("dist=");
+  Serial.print(frontUltrasonic.getDistanceCm(), 1);
+  Serial.print(",g_pitch=");
   Serial.print(gesturePitchCommand);
-  Serial.print(",safe_pitch=");
+  Serial.print(",s_pitch=");
   Serial.print(safePitchCommand);
   Serial.print(",ruview_presence=");
   Serial.print(latestRuViewDecision.presence ? "true" : "false");
@@ -104,7 +139,10 @@ void setup() {
 
   Serial.println();
   Serial.println(GD1_DRONE_RECEIVER_FIRMWARE);
-  Serial.println("RuView CSI JSON integration. No camera, OpenCV, YOLO, or visual processing.");
+  Serial.println("GD-1 Full Receiver: Ultrasonic + RuView + GD1Protocol + SBUS");
+
+  frontUltrasonic.begin();
+  sbus.begin();
 
   connectWiFi();
 
@@ -113,14 +151,47 @@ void setup() {
 
   Serial.print("Listening for RuView JSON on HTTP port ");
   Serial.println(GD1_RUVIEW_LISTEN_PORT);
+
+  gestureUdp.begin(GD1_GESTURE_LISTEN_PORT);
+  Serial.print("Listening for GD1Protocol via UDP on port ");
+  Serial.println(GD1_GESTURE_LISTEN_PORT);
 }
 
 void loop() {
   server.handleClient();
+  frontUltrasonic.update();
+  handleGesturePacket();
 
-  // Replace this placeholder with the decoded gesture pitch command from FR2/FR3.
-  gesturePitchCommand = 40;
+  const uint32_t now = millis();
+
+  // Failsafe: if no gesture received recently, hover
+  if (now - lastGestureReceivedMs > GD1_GESTURE_TIMEOUT_MS) {
+    gesturePitchCommand = 0;
+    gestureRollCommand = 0;
+    gestureThrottleCommand = 0;
+    gestureYawCommand = 0;
+  } else {
+    gesturePitchCommand = latestGestureCommand.pitch;
+    gestureRollCommand = latestGestureCommand.roll;
+    gestureThrottleCommand = latestGestureCommand.throttle;
+    gestureYawCommand = latestGestureCommand.yaw;
+  }
+
   safePitchCommand = applySafetyOverrides(gesturePitchCommand);
+
+  // Map -100 to 100 range to 1000-2000 PWM
+  uint16_t pwmPitch = 1500 + (safePitchCommand * 5);
+  uint16_t pwmRoll = 1500 + (gestureRollCommand * 5);
+  uint16_t pwmYaw = 1500 + (gestureYawCommand * 5);
+  uint16_t pwmThrottle = 1000 + (gestureThrottleCommand * 10); // Assume throttle is 0 to 100
+
+  // AETR mapping for SBUS: Ch1=Roll, Ch2=Pitch, Ch3=Throttle, Ch4=Yaw
+  sbus.setChannel(0, pwmRoll);
+  sbus.setChannel(1, pwmPitch);
+  sbus.setChannel(2, pwmThrottle);
+  sbus.setChannel(3, pwmYaw);
+
+  sbus.update();
 
   printSafetyDebug();
 }
