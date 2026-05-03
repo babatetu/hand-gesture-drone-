@@ -23,6 +23,9 @@ GestureAttitude neutralOffset{0.0f, 0.0f};
 GestureAttitude filteredAttitude{0.0f, 0.0f};
 bool hasFilteredSample = false;
 
+bool isFastMode = false;
+unsigned long lastButtonPressMs = 0;
+
 unsigned long lastSampleMs = 0;
 unsigned long lastSerialMs = 0;
 uint16_t commandSequence = 0;
@@ -147,6 +150,19 @@ void configureMpu() {
   mpu.setFilterBandwidth(MPU6050_BAND_21_HZ);
 }
 
+void checkModeButton() {
+  const unsigned long now = millis();
+  // Button is active LOW (assuming built-in BOOT button with pullup)
+  if (digitalRead(GD1_MODE_BUTTON_PIN) == LOW) {
+    if (now - lastButtonPressMs > 500) { // 500ms debounce
+      isFastMode = !isFastMode;
+      lastButtonPressMs = now;
+      Serial.print("Mode changed: ");
+      Serial.println(isFastMode ? "FAST" : "STABLE");
+    }
+  }
+}
+
 } // namespace
 
 void setup() {
@@ -175,11 +191,15 @@ void setup() {
     }
   }
 
+  pinMode(GD1_MODE_BUTTON_PIN, INPUT_PULLUP);
+
   printCsvHeader();
 }
 
 void loop() {
   const unsigned long now = millis();
+
+  checkModeButton();
 
   if (now - lastSampleMs < GD1_SAMPLE_INTERVAL_MS) {
     return;
@@ -199,6 +219,11 @@ void loop() {
   const GestureCommand command = gestureProcessor.process(commandAttitude);
   const uint16_t sequence = commandSequence++;
 
+  uint8_t flags = GD1_FLAG_CALIBRATED;
+  if (isFastMode) {
+    flags |= GD1_FLAG_FAST_MODE;
+  }
+
   uint8_t packet[GD1_COMMAND_PACKET_SIZE] = {};
   const GD1ControlCommand radioCommand{
       sequence,
@@ -207,7 +232,7 @@ void loop() {
       command.roll,
       0,
       0,
-      static_cast<uint8_t>(GD1_FLAG_CALIBRATED),
+      flags,
   };
   const bool packetOk = gd1EncodeCommandPacket(radioCommand, packet, sizeof(packet));
 

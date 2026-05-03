@@ -28,6 +28,7 @@ int16_t gesturePitchCommand = 0;
 int16_t gestureRollCommand = 0;
 int16_t gestureThrottleCommand = 0;
 int16_t gestureYawCommand = 0;
+bool isFastMode = false;
 
 int16_t safePitchCommand = 0;
 
@@ -171,10 +172,15 @@ void loop() {
     gestureThrottleCommand = 0;
     gestureYawCommand = 0;
   } else {
-    gesturePitchCommand = latestGestureCommand.pitch;
-    gestureRollCommand = latestGestureCommand.roll;
+    isFastMode = (latestGestureCommand.flags & GD1_FLAG_FAST_MODE) != 0;
+
+    // In Stable Mode, scale inputs by 50% to restrict maximum lean angle
+    float scale = isFastMode ? 1.0f : 0.5f;
+
+    gesturePitchCommand = latestGestureCommand.pitch * scale;
+    gestureRollCommand = latestGestureCommand.roll * scale;
     gestureThrottleCommand = latestGestureCommand.throttle;
-    gestureYawCommand = latestGestureCommand.yaw;
+    gestureYawCommand = latestGestureCommand.yaw * scale;
   }
 
   safePitchCommand = applySafetyOverrides(gesturePitchCommand);

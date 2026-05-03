@@ -11,7 +11,8 @@ enum GD1CommandFlag : uint8_t {
   GD1_FLAG_NONE = 0,
   GD1_FLAG_EMERGENCY_STOP = 1 << 0,
   GD1_FLAG_FAILSAFE = 1 << 1,
-  GD1_FLAG_CALIBRATED = 1 << 2
+  GD1_FLAG_CALIBRATED = 1 << 2,
+  GD1_FLAG_FAST_MODE = 1 << 3
 };
 
 struct GD1ControlCommand {
