@@ -1,0 +1,18 @@
+{
+  "listen_host": "0.0.0.0",
+  "listen_port": 5006,
+  "drone_host": "192.168.1.80",
+  "drone_port": 5010,
+  "node_directions": {
+    "front": "front",
+    "left": "left",
+    "right": "right"
+  },
+  "presence_energy_threshold": 18.0,
+  "motion_low_threshold": 8.0,
+  "motion_high_threshold": 22.0,
+  "node_timeout_seconds": 2.0,
+  "emit_interval_seconds": 0.1,
+  "ruview_path": "../../third_party/RuView"
+}
+

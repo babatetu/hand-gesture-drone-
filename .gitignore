@@ -1,0 +1,11 @@
+.pio/
+.venv/
+.vscode/
+__pycache__/
+*.pyc
+*.log
+pio-build*.log
+third_party/RuView.zip
+*.tmp
+.DS_Store
+Thumbs.db

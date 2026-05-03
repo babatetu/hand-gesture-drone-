@@ -1,0 +1,9 @@
+{
+  "name": "GD1Protocol",
+  "version": "0.1.0",
+  "description": "Shared GD-1 command packet encoder and decoder",
+  "keywords": ["gd1", "drone", "packet", "crc"],
+  "frameworks": "*",
+  "platforms": "*"
+}
+
