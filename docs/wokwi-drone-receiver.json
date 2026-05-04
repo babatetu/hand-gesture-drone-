@@ -4,19 +4,33 @@
   "editor": "wokwi",
   "parts": [
     { "type": "board-esp32-devkit-c-v4", "id": "esp", "top": 0, "left": 0, "attrs": {} },
-    { "type": "wokwi-hc-sr04", "id": "sonar_front", "top": -150, "left": -150, "attrs": { "distance": "150" } },
-    { "type": "wokwi-hc-sr04", "id": "sonar_bottom", "top": -150, "left": 150, "attrs": { "distance": "200" } }
+
+    { "type": "wokwi-hc-sr04", "id": "sonar_front", "top": -150, "left": -200, "attrs": { "distance": "150" } },
+    { "type": "wokwi-resistor", "id": "r1_front", "top": -80, "left": -150, "attrs": { "value": "1000" } },
+    { "type": "wokwi-resistor", "id": "r2_front", "top": -40, "left": -150, "attrs": { "value": "2000" } },
+
+    { "type": "wokwi-hc-sr04", "id": "sonar_bottom", "top": -150, "left": 150, "attrs": { "distance": "200" } },
+    { "type": "wokwi-resistor", "id": "r1_bottom", "top": -80, "left": 150, "attrs": { "value": "1000" } },
+    { "type": "wokwi-resistor", "id": "r2_bottom", "top": -40, "left": 150, "attrs": { "value": "2000" } }
   ],
   "connections": [
     [ "esp:5V", "sonar_front:VCC", "red", [ "v0" ] ],
     [ "esp:GND", "sonar_front:GND", "black", [ "v0" ] ],
     [ "esp:14", "sonar_front:TRIG", "green", [ "v0" ] ],
-    [ "esp:27", "sonar_front:ECHO", "blue", [ "v0" ] ],
+
+    [ "sonar_front:ECHO", "r1_front:1", "yellow", [ "v0" ] ],
+    [ "r1_front:2", "r2_front:1", "yellow", [ "v0" ] ],
+    [ "r2_front:2", "esp:GND", "black", [ "v0" ] ],
+    [ "r1_front:2", "esp:27", "blue", [ "v0" ] ],
 
     [ "esp:5V", "sonar_bottom:VCC", "red", [ "v0" ] ],
     [ "esp:GND", "sonar_bottom:GND", "black", [ "v0" ] ],
     [ "esp:25", "sonar_bottom:TRIG", "green", [ "v0" ] ],
-    [ "esp:26", "sonar_bottom:ECHO", "blue", [ "v0" ] ]
+
+    [ "sonar_bottom:ECHO", "r1_bottom:1", "yellow", [ "v0" ] ],
+    [ "r1_bottom:2", "r2_bottom:1", "yellow", [ "v0" ] ],
+    [ "r2_bottom:2", "esp:GND", "black", [ "v0" ] ],
+    [ "r1_bottom:2", "esp:26", "blue", [ "v0" ] ]
   ],
   "dependencies": {}
 }

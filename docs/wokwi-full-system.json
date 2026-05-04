@@ -1,0 +1,69 @@
+{
+  "version": 1,
+  "author": "Jules",
+  "editor": "wokwi",
+  "parts": [
+    {
+      "type": "board-esp32-devkit-c-v4",
+      "id": "esp_receiver",
+      "top": 0,
+      "left": 0,
+      "attrs": { "env": "arduino-esp32" }
+    },
+    {
+      "type": "wokwi-hc-sr04",
+      "id": "sonar_front",
+      "top": -150,
+      "left": -150,
+      "attrs": { "distance": "150" }
+    },
+    {
+      "type": "wokwi-hc-sr04",
+      "id": "sonar_bottom",
+      "top": -150,
+      "left": 150,
+      "attrs": { "distance": "200" }
+    },
+    {
+      "type": "board-esp32-devkit-c-v4",
+      "id": "esp_glove",
+      "top": 0,
+      "left": 400,
+      "attrs": { "env": "arduino-esp32" }
+    },
+    {
+      "type": "board-mpu6050",
+      "id": "imu",
+      "top": -150,
+      "left": 450,
+      "attrs": {}
+    },
+    {
+      "type": "wokwi-pushbutton",
+      "id": "btn_mode",
+      "top": 100,
+      "left": 300,
+      "attrs": { "color": "red" }
+    }
+  ],
+  "connections": [
+    [ "esp_receiver:5V", "sonar_front:VCC", "red", [ "v0" ] ],
+    [ "esp_receiver:GND", "sonar_front:GND", "black", [ "v0" ] ],
+    [ "esp_receiver:14", "sonar_front:TRIG", "green", [ "v0" ] ],
+    [ "esp_receiver:27", "sonar_front:ECHO", "blue", [ "v0" ] ],
+
+    [ "esp_receiver:5V", "sonar_bottom:VCC", "red", [ "v0" ] ],
+    [ "esp_receiver:GND", "sonar_bottom:GND", "black", [ "v0" ] ],
+    [ "esp_receiver:25", "sonar_bottom:TRIG", "green", [ "v0" ] ],
+    [ "esp_receiver:26", "sonar_bottom:ECHO", "blue", [ "v0" ] ],
+
+    [ "esp_glove:3V3", "imu:VCC", "red", [ "v0" ] ],
+    [ "esp_glove:GND", "imu:GND", "black", [ "v0" ] ],
+    [ "esp_glove:21", "imu:SDA", "green", [ "v0" ] ],
+    [ "esp_glove:22", "imu:SCL", "blue", [ "v0" ] ],
+
+    [ "esp_glove:GND", "btn_mode:1.a", "black", [ "v0" ] ],
+    [ "esp_glove:0", "btn_mode:2.a", "green", [ "v0" ] ]
+  ],
+  "dependencies": {}
+}
