@@ -255,7 +255,7 @@ void loop() {
       static_cast<uint32_t>(now),
       command.pitch,
       command.roll,
-      0,
+      0, // Throttle is set to 0 initially
       command.yaw,
       flags,
   };

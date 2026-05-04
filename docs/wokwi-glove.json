@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "author": "Jules",
+  "editor": "wokwi",
+  "parts": [
+    { "type": "board-esp32-devkit-c-v4", "id": "esp", "top": 0, "left": 0, "attrs": {} },
+    { "type": "board-mpu6050", "id": "imu", "top": -150, "left": 0, "attrs": {} },
+    { "type": "wokwi-pushbutton", "id": "btn_mode", "top": 50, "left": -100, "attrs": { "color": "red" } }
+  ],
+  "connections": [
+    [ "esp:3V3", "imu:VCC", "red", [ "v0" ] ],
+    [ "esp:GND", "imu:GND", "black", [ "v0" ] ],
+    [ "esp:21", "imu:SDA", "green", [ "v0" ] ],
+    [ "esp:22", "imu:SCL", "blue", [ "v0" ] ],
+
+    [ "esp:GND", "btn_mode:1.a", "black", [ "v0" ] ],
+    [ "esp:0", "btn_mode:2.a", "green", [ "v0" ] ]
+  ],
+  "dependencies": {}
+}

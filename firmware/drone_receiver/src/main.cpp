@@ -95,14 +95,14 @@ void applySafetyOverrides() {
   }
 
   // Throttle Up (Up VL53L1X)
-  if (tofArray.isOk(3) && gestureThrottleCommand > lastSafeThrottle) {
+  if (tofArray.isOk(3) && gestureThrottleCommand > previousThrottleCommand) {
     uint16_t upDist = tofArray.getUp();
     if (upDist < HARD_BLOCK_UP_CM) {
-      gestureThrottleCommand = lastSafeThrottle; // Clamp
+      gestureThrottleCommand = previousThrottleCommand; // Clamp to previous safe state
       Serial.println("HARD BLOCK: UP");
     } else if (upDist < SOFT_WARN_UP_CM) {
-      int16_t diff = gestureThrottleCommand - lastSafeThrottle;
-      gestureThrottleCommand = lastSafeThrottle + static_cast<int16_t>(diff * 0.5f);
+      int16_t diff = gestureThrottleCommand - previousThrottleCommand;
+      gestureThrottleCommand = previousThrottleCommand + static_cast<int16_t>(diff * 0.5f);
     }
   }
 }
@@ -202,14 +202,15 @@ void loop() {
     gestureRollCommand = latestGestureCommand.roll * scale;
     gestureThrottleCommand = latestGestureCommand.throttle;
     gestureYawCommand = latestGestureCommand.yaw * scale;
-
-    lastSafeThrottle = gestureThrottleCommand;
   }
 
   applySafetyOverrides();
 
   safePitchCommand = gesturePitchCommand;
   safeThrottleCommand = gestureThrottleCommand;
+
+  // We explicitly update lastSafeThrottle AFTER all safety modifications
+  lastSafeThrottle = safeThrottleCommand;
 
   // Soft landing guard:
   float alt = bottomUltrasonic.getDistanceCm();
@@ -221,6 +222,11 @@ void loop() {
         safeThrottleCommand = previousThrottleCommand - maxReduction;
       }
     }
+  }
+
+  // Ensure throttle never goes below 0 to prevent SBUS calculation underflow
+  if (safeThrottleCommand < 0) {
+    safeThrottleCommand = 0;
   }
 
   previousThrottleCommand = safeThrottleCommand;
